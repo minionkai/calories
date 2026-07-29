@@ -12,11 +12,13 @@ import More from './pages/More';
 import SavedFoods from './pages/SavedFoods';
 
 export default function App() {
-  const profile = useLiveQuery(() => db.profile.get(1));
+  // Third argument is a sentinel default returned only while the query is
+  // still loading — this lets us tell "loading" apart from "no profile row
+  // found yet", since Dexie's .get() returns undefined for both cases.
+  const profile = useLiveQuery(() => db.profile.get(1), [], 'loading');
   const [forceOnboarded, setForceOnboarded] = useState(false);
 
-  // useLiveQuery returns undefined while loading, null-ish once resolved with no row
-  if (profile === undefined) return null;
+  if (profile === 'loading') return null;
 
   if (!profile && !forceOnboarded) {
     return (
