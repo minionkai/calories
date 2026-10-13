@@ -12,14 +12,32 @@ export default function ScannerModal({ onResult, onClose }) {
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [result, setResult] = useState(null); // parsed food, shown in shared result step
-  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
   const qrRef = useRef(null);
+  const stoppedRef = useRef(true); // tracks whether the scanner is currently running
+
+  // Safely stops the scanner exactly once. Html5Qrcode throws (sometimes
+  // synchronously) if .stop() is called when it isn't actively running —
+  // calling this twice in a row was the root cause of the app going blank
+  // after saving a scanned barcode, since an uncaught error here has no
+  // error boundary to catch it and wipes the whole render tree.
+  const safeStop = async () => {
+    if (stoppedRef.current || !qrRef.current) return;
+    stoppedRef.current = true;
+    try {
+      await qrRef.current.stop();
+    } catch {
+      /* already stopped, or never fully started — safe to ignore */
+    }
+  };
 
   // --- Barcode mode -------------------------------------------------------
   useEffect(() => {
     if (mode !== 'barcode') return;
     const scanner = new Html5Qrcode(READER_ID);
     qrRef.current = scanner;
+    stoppedRef.current = false;
     setStatus('Point the camera at a barcode…');
 
     scanner
@@ -28,9 +46,7 @@ export default function ScannerModal({ onResult, onClose }) {
         { fps: 10, qrbox: { width: 250, height: 150 } },
         async (decodedText) => {
           setStatus('Looking up product…');
-          try {
-            await scanner.stop();
-          } catch { /* already stopped */ }
+          await safeStop();
           try {
             const food = await lookupBarcode(decodedText);
             if (!food) {
@@ -47,14 +63,13 @@ export default function ScannerModal({ onResult, onClose }) {
         () => {} // per-frame decode errors, ignored
       )
       .catch((e) => {
+        stoppedRef.current = true;
         setError('Camera unavailable: ' + (e?.message || e));
         setMode(null);
       });
 
     return () => {
-      if (qrRef.current) {
-        qrRef.current.stop().catch(() => {});
-      }
+      safeStop();
     };
   }, [mode]);
 
@@ -109,17 +124,34 @@ export default function ScannerModal({ onResult, onClose }) {
               <button
                 className="btn btn-secondary"
                 style={{ flex: 1 }}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => cameraInputRef.current?.click()}
               >
-                Take / upload photo
+                Take photo
               </button>
-              <button className="btn btn-outline" onClick={() => { setMode(null); setError(''); }}>Back</button>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => galleryInputRef.current?.click()}
+              >
+                Choose from gallery
+              </button>
             </div>
+            <button className="btn btn-outline btn-block" style={{ marginBottom: 10 }} onClick={() => { setMode(null); setError(''); }}>Back</button>
+            {/* Camera input: `capture` forces the device camera to open directly. */}
             <input
-              ref={fileInputRef}
+              ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
+              style={{ display: 'none' }}
+              onChange={(e) => handleImage(e.target.files?.[0])}
+            />
+            {/* Gallery input: no `capture` attribute, so the OS shows the normal
+                file/photo picker (camera roll, Files app, etc). */}
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
               style={{ display: 'none' }}
               onChange={(e) => handleImage(e.target.files?.[0])}
             />

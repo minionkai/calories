@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import db from '../db';
 import { scaleNutrients, sumNutrients, todayISO } from '../utils/nutrition';
 import LogEntryModal from '../components/LogEntryModal';
+import FoodDefinitionModal from '../components/FoodDefinitionModal';
+
+const ScannerModal = lazy(() => import('../components/ScannerModal'));
 
 export default function Recipes() {
   const recipes = useLiveQuery(() => db.recipes.toArray()) || [];
@@ -89,10 +92,28 @@ function RecipeBuilder({ foods, onClose }) {
   const [name, setName] = useState('');
   const [servings, setServings] = useState(1);
   const [rows, setRows] = useState([{ foodId: '', qty: 100, unit: 'g' }]);
+  const [creatingFoodForRow, setCreatingFoodForRow] = useState(null); // row index
+  const [creationMode, setCreationMode] = useState(null); // 'choose' | 'manual' | 'scan'
 
   const addRow = () => setRows((r) => [...r, { foodId: '', qty: 100, unit: 'g' }]);
   const updateRow = (i, patch) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   const removeRow = (i) => setRows((r) => r.filter((_, idx) => idx !== i));
+
+  const openFoodCreation = (rowIndex) => {
+    setCreatingFoodForRow(rowIndex);
+    setCreationMode('choose');
+  };
+
+  const closeFoodCreation = () => {
+    setCreatingFoodForRow(null);
+    setCreationMode(null);
+  };
+
+  const handleNewFoodSaved = async (food) => {
+    const id = await db.foods.add({ ...food, isFavourite: 0, lastLoggedAt: Date.now(), source: food.source || 'manual' });
+    updateRow(creatingFoodForRow, { foodId: String(id), qty: food.servingSize, unit: food.servingUnit });
+    closeFoodCreation();
+  };
 
   const save = async () => {
     if (!name.trim() || rows.some((r) => !r.foodId)) return;
@@ -128,16 +149,21 @@ function RecipeBuilder({ foods, onClose }) {
 
         <label style={{ display: 'block', marginBottom: 6 }}>Ingredients</label>
         {rows.map((row, i) => (
-          <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-            <select value={row.foodId} onChange={(e) => updateRow(i, { foodId: e.target.value })} style={{ flex: 2 }}>
-              <option value="">Select saved food…</option>
-              {foods.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
-            <input type="number" value={row.qty} onChange={(e) => updateRow(i, { qty: e.target.value })} style={{ width: 60 }} />
-            <select value={row.unit} onChange={(e) => updateRow(i, { unit: e.target.value })} style={{ width: 66 }}>
-              {['g', 'kg', 'ml', 'L'].map((u) => <option key={u}>{u}</option>)}
-            </select>
-            <button className="btn btn-outline" onClick={() => removeRow(i)}>✕</button>
+          <div key={i} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+              <select value={row.foodId} onChange={(e) => updateRow(i, { foodId: e.target.value })} style={{ flex: 2 }}>
+                <option value="">Select saved food…</option>
+                {foods.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+              <input type="number" value={row.qty} onChange={(e) => updateRow(i, { qty: e.target.value })} style={{ width: 60 }} />
+              <select value={row.unit} onChange={(e) => updateRow(i, { unit: e.target.value })} style={{ width: 66 }}>
+                {['g', 'kg', 'ml', 'L'].map((u) => <option key={u}>{u}</option>)}
+              </select>
+              <button className="btn btn-outline" onClick={() => removeRow(i)}>✕</button>
+            </div>
+            <button className="btn btn-secondary" style={{ fontSize: '0.78rem', padding: '5px 10px' }} onClick={() => openFoodCreation(i)}>
+              + Create new food for this ingredient
+            </button>
           </div>
         ))}
         <button className="btn btn-secondary btn-block" style={{ marginBottom: 14 }} onClick={addRow}>+ Add ingredient</button>
@@ -147,6 +173,29 @@ function RecipeBuilder({ foods, onClose }) {
           <button className="btn btn-primary" style={{ flex: 2 }} onClick={save}>Save recipe</button>
         </div>
       </div>
+
+      {creationMode === 'choose' && (
+        <div className="modal-overlay" onClick={(e) => { e.stopPropagation(); closeFoodCreation(); }}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 12 }}>Add a new food</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button className="btn btn-primary btn-block" onClick={() => setCreationMode('scan')}>📷 Scan (label or barcode)</button>
+              <button className="btn btn-secondary btn-block" onClick={() => setCreationMode('manual')}>✏️ Manual entry</button>
+              <button className="btn btn-outline btn-block" onClick={closeFoodCreation}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {creationMode === 'manual' && (
+        <FoodDefinitionModal title="Add food manually" onSave={handleNewFoodSaved} onClose={closeFoodCreation} />
+      )}
+
+      {creationMode === 'scan' && (
+        <Suspense fallback={<div className="modal-overlay"><div className="modal-sheet">Loading scanner…</div></div>}>
+          <ScannerModal onResult={handleNewFoodSaved} onClose={closeFoodCreation} />
+        </Suspense>
+      )}
     </div>
   );
 }
