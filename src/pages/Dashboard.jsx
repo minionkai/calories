@@ -17,6 +17,10 @@ export default function Dashboard() {
   const waterEntries = useLiveQuery(() => db.water.where('date').equals(today).toArray(), [today]) || [];
   const stepRow = useLiveQuery(() => db.steps.get(today), [today]);
   const [stepInput, setStepInput] = useState('');
+  const [editingSteps, setEditingSteps] = useState(false);
+  const [customWater, setCustomWater] = useState('');
+  const [editingWaterId, setEditingWaterId] = useState(null);
+  const [editingWaterAmount, setEditingWaterAmount] = useState('');
 
   const totals = sumNutrients(entries);
   const waterMl = waterEntries.reduce((a, w) => a + w.amountMl, 0);
@@ -27,12 +31,30 @@ export default function Dashboard() {
   if (!goals) return null;
 
   const addWater = async (ml) => {
+    if (!ml) return;
     await db.water.add({ date: today, amountMl: ml, time: new Date().toISOString() });
+  };
+
+  const startEditWater = (entry) => {
+    setEditingWaterId(entry.id);
+    setEditingWaterAmount(String(entry.amountMl));
+  };
+
+  const saveWaterEdit = async () => {
+    const amount = Number(editingWaterAmount) || 0;
+    await db.water.update(editingWaterId, { amountMl: amount });
+    setEditingWaterId(null);
+  };
+
+  const deleteWater = async (id) => {
+    await db.water.delete(id);
+    if (editingWaterId === id) setEditingWaterId(null);
   };
 
   const saveSteps = async () => {
     const count = Number(stepInput) || 0;
     await db.steps.put({ date: today, count });
+    setEditingSteps(false);
   };
 
   return (
@@ -85,6 +107,50 @@ export default function Dashboard() {
             <button key={ml} className="btn btn-secondary" style={{ flex: 1 }} onClick={() => addWater(ml)}>+{ml}ml</button>
           ))}
         </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <input
+            type="number"
+            placeholder="Custom amount (ml)"
+            value={customWater}
+            onChange={(e) => setCustomWater(e.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={() => { addWater(Number(customWater) || 0); setCustomWater(''); }}
+          >
+            Add
+          </button>
+        </div>
+
+        {waterEntries.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {waterEntries.map((w) => (
+              <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--ink-soft)', flex: 1 }}>
+                  {new Date(w.time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                {editingWaterId === w.id ? (
+                  <>
+                    <input
+                      type="number"
+                      value={editingWaterAmount}
+                      onChange={(e) => setEditingWaterAmount(e.target.value)}
+                      style={{ width: 70 }}
+                    />
+                    <button className="btn btn-primary" onClick={saveWaterEdit}>Save</button>
+                    <button className="btn btn-outline" onClick={() => setEditingWaterId(null)}>✕</button>
+                  </>
+                ) : (
+                  <>
+                    <span className="mono" style={{ fontSize: '0.82rem' }}>{w.amountMl}ml</span>
+                    <button className="btn btn-outline" onClick={() => startEditWater(w)}>Edit</button>
+                    <button className="btn btn-danger" onClick={() => deleteWater(w.id)}>✕</button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="section-heading">Steps</div>
@@ -94,10 +160,23 @@ export default function Dashboard() {
           <span className="mono" style={{ fontSize: '0.85rem' }}>{steps} / {STEP_GOAL}</span>
         </div>
         <TickBar value={steps} goal={STEP_GOAL} />
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input type="number" placeholder="Enter steps" value={stepInput} onChange={(e) => setStepInput(e.target.value)} />
-          <button className="btn btn-primary" onClick={saveSteps}>Save</button>
-        </div>
+        {!editingSteps ? (
+          <button className="btn btn-secondary btn-block" style={{ marginTop: 12 }} onClick={() => setEditingSteps(true)}>
+            {steps ? 'Edit steps' : 'Enter steps'}
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <input
+              type="number"
+              placeholder="Enter steps"
+              value={stepInput}
+              onChange={(e) => setStepInput(e.target.value)}
+              autoFocus
+            />
+            <button className="btn btn-primary" onClick={saveSteps}>Save</button>
+            <button className="btn btn-outline" onClick={() => setEditingSteps(false)}>✕</button>
+          </div>
+        )}
       </div>
     </div>
   );
