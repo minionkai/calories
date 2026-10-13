@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import db from '../db';
 import { movingAverage } from '../utils/nutrition';
+import { parseCSV, mapCsvRowsToBodyComposition } from '../utils/csv';
 
 const RANGE_DAYS = { Weekly: 7, Monthly: 30, Yearly: 365 };
 const METRICS = [
@@ -80,7 +81,55 @@ export default function Progress() {
         Teal = daily value · Amber dashed = 7-day moving average (smooths out day-to-day fluctuation).
       </p>
 
+      <CsvImportForm />
       <CheckInForm />
+    </div>
+  );
+}
+
+function CsvImportForm() {
+  const fileInputRef = useRef(null);
+  const [status, setStatus] = useState('');
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setStatus('Reading file…');
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const mapped = mapCsvRowsToBodyComposition(rows);
+      if (mapped.length === 0) {
+        setStatus('No usable rows found. Make sure your CSV has a "date" column plus any of: weight, bodyFatPct, bodyFatMassKg, muscleMassPct, muscleMassKg, boneMassKg, boneMassPct, visceralRating, visceralPct.');
+        return;
+      }
+      await db.bodyComposition.bulkAdd(mapped);
+      setStatus(`Imported ${mapped.length} check-in${mapped.length === 1 ? '' : 's'}.`);
+    } catch {
+      setStatus('Could not read that file — make sure it\'s a plain CSV export.');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginBottom: 6, fontSize: '0.95rem' }}>Import from CSV</h3>
+      <p style={{ fontSize: '0.78rem', color: 'var(--ink-soft)', marginBottom: 10 }}>
+        Bulk-upload weight and body composition history. Expected columns: date (required),
+        weight, bodyFatPct, bodyFatMassKg, muscleMassPct, muscleMassKg, boneMassKg, boneMassPct,
+        visceralRating, visceralPct — any subset is fine.
+      </p>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        style={{ display: 'none' }}
+        onChange={(e) => handleFile(e.target.files?.[0])}
+      />
+      <button className="btn btn-secondary btn-block" onClick={() => fileInputRef.current?.click()}>
+        Choose CSV file…
+      </button>
+      {status && <p style={{ fontSize: '0.8rem', marginTop: 8, color: 'var(--ink-soft)' }}>{status}</p>}
     </div>
   );
 }
