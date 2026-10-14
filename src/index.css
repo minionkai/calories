@@ -45,6 +45,7 @@ body {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
   position: relative;
   display: flex;
@@ -83,7 +84,9 @@ a { color: inherit; }
 
 .screen {
   flex: 1;
-  padding: 20px 16px 92px;
+  /* Keep content clear of the iPhone status bar / notch (time, battery) */
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 16px 92px;
+  min-height: 0;
   overflow-y: auto;
 }
 

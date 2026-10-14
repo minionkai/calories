@@ -4,6 +4,7 @@ import db from '../db';
 import { scaleNutrients, sumNutrients, todayISO } from '../utils/nutrition';
 import LogEntryModal from '../components/LogEntryModal';
 import FoodDefinitionModal from '../components/FoodDefinitionModal';
+import AddFoodSheet from '../components/AddFoodSheet';
 
 const ScannerModal = lazy(() => import('../components/ScannerModal'));
 
@@ -92,27 +93,26 @@ function RecipeBuilder({ foods, onClose }) {
   const [name, setName] = useState('');
   const [servings, setServings] = useState(1);
   const [rows, setRows] = useState([{ foodId: '', qty: 100, unit: 'g' }]);
-  const [creatingFoodForRow, setCreatingFoodForRow] = useState(null); // row index
-  const [creationMode, setCreationMode] = useState(null); // 'choose' | 'manual' | 'scan'
+  const [sheet, setSheet] = useState(null); // 'pick' | 'manual' | 'scan' | null
 
   const addRow = () => setRows((r) => [...r, { foodId: '', qty: 100, unit: 'g' }]);
   const updateRow = (i, patch) => setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   const removeRow = (i) => setRows((r) => r.filter((_, idx) => idx !== i));
 
-  const openFoodCreation = (rowIndex) => {
-    setCreatingFoodForRow(rowIndex);
-    setCreationMode('choose');
-  };
-
-  const closeFoodCreation = () => {
-    setCreatingFoodForRow(null);
-    setCreationMode(null);
+  // Adds a food as an ingredient. If the last row is still empty, fill it
+  // instead of leaving a blank row behind.
+  const addFoodAsIngredient = (food) => {
+    const row = { foodId: String(food.id), qty: food.servingSize, unit: food.servingUnit };
+    setRows((r) => {
+      const last = r[r.length - 1];
+      return last && !last.foodId ? [...r.slice(0, -1), row] : [...r, row];
+    });
+    setSheet(null);
   };
 
   const handleNewFoodSaved = async (food) => {
     const id = await db.foods.add({ ...food, isFavourite: 0, lastLoggedAt: Date.now(), source: food.source || 'manual' });
-    updateRow(creatingFoodForRow, { foodId: String(id), qty: food.servingSize, unit: food.servingUnit });
-    closeFoodCreation();
+    addFoodAsIngredient({ ...food, id });
   };
 
   const save = async () => {
@@ -135,22 +135,22 @@ function RecipeBuilder({ foods, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 12 }}>New recipe</h3>
-        <div className="field">
-          <label>Recipe name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Number of servings</label>
-          <input type="number" value={servings} onChange={(e) => setServings(e.target.value)} />
-        </div>
+    <>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+          <h3 style={{ marginBottom: 12 }}>New recipe</h3>
+          <div className="field">
+            <label>Recipe name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Number of servings</label>
+            <input type="number" value={servings} onChange={(e) => setServings(e.target.value)} />
+          </div>
 
-        <label style={{ display: 'block', marginBottom: 6 }}>Ingredients</label>
-        {rows.map((row, i) => (
-          <div key={i} style={{ marginBottom: 8 }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+          <label style={{ display: 'block', marginBottom: 6 }}>Ingredients</label>
+          {rows.map((row, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               <select value={row.foodId} onChange={(e) => updateRow(i, { foodId: e.target.value })} style={{ flex: 2 }}>
                 <option value="">Select saved food…</option>
                 {foods.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -161,41 +161,37 @@ function RecipeBuilder({ foods, onClose }) {
               </select>
               <button className="btn btn-outline" onClick={() => removeRow(i)}>✕</button>
             </div>
-            <button className="btn btn-secondary" style={{ fontSize: '0.78rem', padding: '5px 10px' }} onClick={() => openFoodCreation(i)}>
-              + Create new food for this ingredient
-            </button>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={addRow}>+ Add ingredient</button>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSheet('pick')}>+ Add food</button>
           </div>
-        ))}
-        <button className="btn btn-secondary btn-block" style={{ marginBottom: 14 }} onClick={addRow}>+ Add ingredient</button>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 2 }} onClick={save}>Save recipe</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 2 }} onClick={save}>Save recipe</button>
+          </div>
         </div>
       </div>
 
-      {creationMode === 'choose' && (
-        <div className="modal-overlay" onClick={(e) => { e.stopPropagation(); closeFoodCreation(); }}>
-          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 12 }}>Add a new food</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button className="btn btn-primary btn-block" onClick={() => setCreationMode('scan')}>📷 Scan (label or barcode)</button>
-              <button className="btn btn-secondary btn-block" onClick={() => setCreationMode('manual')}>✏️ Manual entry</button>
-              <button className="btn btn-outline btn-block" onClick={closeFoodCreation}>Cancel</button>
-            </div>
-          </div>
-        </div>
+      {/* Rendered as siblings (not children) of the recipe sheet so tapping
+          their backdrop doesn't also close the recipe builder. */}
+      {sheet === 'pick' && (
+        <AddFoodSheet
+          onPickFood={addFoodAsIngredient}
+          onManual={() => setSheet('manual')}
+          onScan={() => setSheet('scan')}
+          onClose={() => setSheet(null)}
+        />
       )}
-
-      {creationMode === 'manual' && (
-        <FoodDefinitionModal title="Add food manually" onSave={handleNewFoodSaved} onClose={closeFoodCreation} />
+      {sheet === 'manual' && (
+        <FoodDefinitionModal title="Add food manually" onSave={handleNewFoodSaved} onClose={() => setSheet(null)} />
       )}
-
-      {creationMode === 'scan' && (
+      {sheet === 'scan' && (
         <Suspense fallback={<div className="modal-overlay"><div className="modal-sheet">Loading scanner…</div></div>}>
-          <ScannerModal onResult={handleNewFoodSaved} onClose={closeFoodCreation} />
+          <ScannerModal onResult={handleNewFoodSaved} onClose={() => setSheet(null)} />
         </Suspense>
       )}
-    </div>
+    </>
   );
 }

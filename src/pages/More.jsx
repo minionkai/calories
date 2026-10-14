@@ -2,16 +2,15 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import db from '../db';
-import { defaultFibreGoal, todayISO } from '../utils/nutrition';
+import { defaultFibreGoal } from '../utils/nutrition';
 
 export default function More() {
   const goals = useLiveQuery(() => db.goals.get(1));
-  const history = useLiveQuery(() => db.goalHistory.orderBy('date').reverse().toArray()) || [];
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
 
   const startEdit = () => {
-    setForm({ ...goals, label: '' });
+    setForm({ ...goals, waterL: goals.waterL ?? 2, label: '' });
     setEditing(true);
   };
 
@@ -28,10 +27,10 @@ export default function More() {
       fat: Number(form.fat) || 0,
       fibre: Number(form.fibre) || 0,
       sodium: Number(form.sodium) || 0,
+      waterL: Number(form.waterL) || 2,
       label: form.label || 'Updated goal',
     };
     await db.goals.put(updated);
-    await db.goalHistory.add({ date: todayISO(), ...updated });
     setEditing(false);
   };
 
@@ -52,10 +51,11 @@ export default function More() {
           {[
             ['Calories', goals.calories, 'kcal'], ['Protein', goals.protein, 'g'], ['Carbohydrates', goals.carbs, 'g'],
             ['Fat', goals.fat, 'g'], ['Fibre', goals.fibre, 'g'], ['Sodium', goals.sodium, 'mg'],
+            ['Water intake', goals.waterL ?? 2, 'L'],
           ].map(([label, val, unit]) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 6 }}>
               <span>{label}</span>
-              <span className="mono">{Math.round(val)} {unit}</span>
+              <span className="mono">{unit === 'L' ? Number(val).toFixed(2) : Math.round(val)} {unit}</span>
             </div>
           ))}
           <button className="btn btn-primary btn-block" style={{ marginTop: 8 }} onClick={startEdit}>Edit goals</button>
@@ -83,37 +83,14 @@ export default function More() {
             <label>Sodium <span className="unit-chip">mg</span></label>
             <input type="number" value={form.sodium} onChange={(e) => set('sodium', e.target.value)} />
           </div>
+          <div className="field">
+            <label>Water intake <span className="unit-chip">L</span></label>
+            <input type="number" step="0.1" value={form.waterL} onChange={(e) => set('waterL', e.target.value)} />
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setEditing(false)}>Cancel</button>
             <button className="btn btn-primary" style={{ flex: 2 }} onClick={save}>Save goals</button>
           </div>
-        </div>
-      )}
-
-      <div className="section-heading">Historical goals</div>
-      {history.length === 0 ? (
-        <div className="empty-state">No goal changes recorded yet.</div>
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-            <thead>
-              <tr style={{ background: 'var(--surface-sunken)' }}>
-                {['Date', 'Calories', 'Protein', 'Goal'].map((h) => (
-                  <th key={h} style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((h) => (
-                <tr key={h.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="mono" style={{ padding: '7px 10px' }}>{h.date}</td>
-                  <td className="mono" style={{ padding: '7px 10px' }}>{Math.round(h.calories)}</td>
-                  <td className="mono" style={{ padding: '7px 10px' }}>{Math.round(h.protein)}g</td>
-                  <td style={{ padding: '7px 10px' }}>{h.label}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
     </div>

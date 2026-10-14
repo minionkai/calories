@@ -6,7 +6,6 @@ import CalorieDial from '../components/CalorieDial';
 import NutrientRow from '../components/NutrientRow';
 import TickBar from '../components/TickBar';
 
-const WATER_GOAL_ML = 2000;
 const STEP_GOAL = 10000;
 const WATER_QUICK_ADD = [250, 500, 750];
 
@@ -29,6 +28,9 @@ export default function Dashboard() {
   useEffect(() => { setStepInput(steps ? String(steps) : ''); }, [steps]);
 
   if (!goals) return null;
+
+  // Water goal (litres) is set under More > Nutrition goals; defaults to 2 L.
+  const WATER_GOAL_ML = (goals.waterL ?? 2) * 1000;
 
   const addWater = async (ml) => {
     if (!ml) return;

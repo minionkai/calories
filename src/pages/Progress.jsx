@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import db from '../db';
-import { movingAverage } from '../utils/nutrition';
-import { parseCSV, mapCsvRowsToBodyComposition } from '../utils/csv';
+import { movingAverage, todayISO } from '../utils/nutrition';
+import { parseCSV, mapCsvRowsToBodyComposition, CSV_TEMPLATE } from '../utils/csv';
 
 const RANGE_DAYS = { Weekly: 7, Monthly: 30, Yearly: 365 };
 const METRICS = [
@@ -91,21 +91,49 @@ function CsvImportForm() {
   const fileInputRef = useRef(null);
   const [status, setStatus] = useState('');
 
+  const downloadTemplate = () => {
+    const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'body-composition-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const handleFile = async (file) => {
     if (!file) return;
     setStatus('Reading file…');
     try {
       const text = await file.text();
-      const rows = parseCSV(text);
-      const mapped = mapCsvRowsToBodyComposition(rows);
-      if (mapped.length === 0) {
-        setStatus('No usable rows found. Make sure your CSV has a "date" column plus any of: weight, bodyFatPct, bodyFatMassKg, muscleMassPct, muscleMassKg, boneMassKg, boneMassPct, visceralRating, visceralPct.');
+      const { entries, skipped } = mapCsvRowsToBodyComposition(parseCSV(text));
+      if (entries.length === 0) {
+        setStatus('No usable rows found. Each row needs a date plus at least one recognised measurement. Try the template below.');
         return;
       }
-      await db.bodyComposition.bulkAdd(mapped);
-      setStatus(`Imported ${mapped.length} check-in${mapped.length === 1 ? '' : 's'}.`);
+      // One check-in per date: if a date already exists, update it instead of duplicating.
+      const existing = await db.bodyComposition.toArray();
+      const idByDate = new Map(existing.map((e) => [e.date, e.id]));
+      let added = 0;
+      let updated = 0;
+      for (const entry of entries) {
+        const id = idByDate.get(entry.date);
+        if (id !== undefined) {
+          await db.bodyComposition.update(id, entry);
+          updated += 1;
+        } else {
+          idByDate.set(entry.date, await db.bodyComposition.add(entry));
+          added += 1;
+        }
+      }
+      setStatus(
+        `Imported ${added} new and updated ${updated} existing check-in${added + updated === 1 ? '' : 's'}` +
+        (skipped ? ` (${skipped} row${skipped === 1 ? '' : 's'} skipped: no readable date or measurements).` : '.')
+      );
     } catch {
-      setStatus('Could not read that file — make sure it\'s a plain CSV export.');
+      setStatus("Could not read that file — make sure it's a plain CSV export.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -115,9 +143,10 @@ function CsvImportForm() {
     <div className="card" style={{ marginBottom: 16 }}>
       <h3 style={{ marginBottom: 6, fontSize: '0.95rem' }}>Import from CSV</h3>
       <p style={{ fontSize: '0.78rem', color: 'var(--ink-soft)', marginBottom: 10 }}>
-        Bulk-upload weight and body composition history. Expected columns: date (required),
-        weight, bodyFatPct, bodyFatMassKg, muscleMassPct, muscleMassKg, boneMassKg, boneMassPct,
-        visceralRating, visceralPct — any subset is fine.
+        Bulk-upload weight and body composition history from a spreadsheet or another app's CSV export.
+        Only a <b>date</b> column is required, plus any of: weight, body fat %, body fat mass, skeletal muscle %,
+        skeletal muscle mass, bone mass, visceral fat. Dates like 2026-07-29 or 29/07/2026 both work
+        (day first). Rows for a date you already have will update that day's check-in.
       </p>
       <input
         ref={fileInputRef}
@@ -126,9 +155,12 @@ function CsvImportForm() {
         style={{ display: 'none' }}
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
-      <button className="btn btn-secondary btn-block" onClick={() => fileInputRef.current?.click()}>
-        Choose CSV file…
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => fileInputRef.current?.click()}>
+          Choose CSV file…
+        </button>
+        <button className="btn btn-outline" onClick={downloadTemplate}>Template</button>
+      </div>
       {status && <p style={{ fontSize: '0.8rem', marginTop: 8, color: 'var(--ink-soft)' }}>{status}</p>}
     </div>
   );
@@ -144,7 +176,7 @@ function CheckInForm() {
 
   const save = async () => {
     await db.bodyComposition.add({
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       weight: Number(form.weight) || null,
       bodyFatPct: Number(form.bodyFatPct) || null,
       bodyFatMassKg: Number(form.bodyFatMassKg) || null,

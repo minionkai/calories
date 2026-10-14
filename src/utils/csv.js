@@ -39,47 +39,88 @@ export function parseCSV(text) {
 }
 
 // Column names we recognize in a body-composition CSV, and their common aliases.
+// Headers are compared after lower-casing and stripping everything except
+// letters, digits and "%", so "Body Fat (%)", "body_fat%" and "BodyFat%" all match.
 const COLUMN_ALIASES = {
-  date: ['date'],
-  weight: ['weight', 'weight_kg', 'weightkg'],
-  bodyFatPct: ['bodyfatpct', 'bodyfat%', 'bodyfat', 'body_fat_pct', 'body fat %', 'body fat'],
-  bodyFatMassKg: ['bodyfatmasskg', 'bodyfatmass', 'body fat mass', 'body fat mass (kg)'],
-  muscleMassPct: ['musclemasspct', 'skeletalmusclepct', 'skeletal muscle %', 'skeletal muscle'],
-  muscleMassKg: ['musclemasskg', 'skeletalmusclemasskg', 'skeletal muscle mass', 'skeletal muscle mass (kg)'],
-  boneMassKg: ['bonemasskg', 'bone mass', 'bone mass (kg)'],
-  boneMassPct: ['bonemasspct', 'bone mass %', 'bone mass (%)'],
-  visceralRating: ['visceralrating', 'visceral fat', 'visceral fat rating', 'visceral'],
-  visceralPct: ['visceralpct', 'visceral fat %', 'visceral %'],
+  date: ['date', 'datetime', 'day', 'measureddate', 'measurementdate', 'timestamp'],
+  weight: ['weight', 'weightkg', 'bodyweight', 'bodyweightkg'],
+  bodyFatPct: ['bodyfatpct', 'bodyfat%', 'bodyfat', 'bodyfatpercent', 'bodyfatpercentage', 'fat%', 'fatpct'],
+  bodyFatMassKg: ['bodyfatmasskg', 'bodyfatmass', 'fatmasskg', 'fatmass'],
+  muscleMassPct: ['musclemasspct', 'musclemass%', 'skeletalmusclepct', 'skeletalmuscle%', 'skeletalmusclepercent', 'musclepct', 'muscle%', 'skeletalmuscle'],
+  muscleMassKg: ['musclemasskg', 'musclemass', 'skeletalmusclemasskg', 'skeletalmusclemass', 'musclekg'],
+  boneMassKg: ['bonemasskg', 'bonemass', 'bonekg'],
+  boneMassPct: ['bonemasspct', 'bonemass%', 'bonepct', 'bone%'],
+  visceralRating: ['visceralrating', 'visceralfat', 'visceralfatrating', 'visceral', 'visceralfatlevel'],
+  visceralPct: ['visceralpct', 'visceralfat%', 'visceral%'],
 };
 
+export const CSV_TEMPLATE =
+  'date,weight,bodyFatPct,bodyFatMassKg,muscleMassPct,muscleMassKg,boneMassKg,boneMassPct,visceralRating,visceralPct\n' +
+  '2026-07-01,55.2,22.5,12.4,38.1,21.0,2.4,4.3,5,\n' +
+  '2026-07-08,54.9,22.1,12.1,38.4,21.1,2.4,4.4,5,\n';
+
 function normalizeKey(key) {
-  return key.toLowerCase().replace(/\s+/g, '');
+  return key.toLowerCase().replace(/[^a-z0-9%]/g, '');
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+
+// Converts the date formats exports commonly use into YYYY-MM-DD, which is
+// what the Progress charts expect. Day-first dates (29/07/2026) are assumed.
+export function normalizeDate(raw) {
+  const str = String(raw).trim();
+  let y, m, d;
+  let match = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (match) {
+    [, y, m, d] = match;
+  } else if ((match = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) {
+    [, d, m, y] = match;
+  } else {
+    const parsed = new Date(str);
+    if (Number.isNaN(parsed.getTime())) return null;
+    y = parsed.getFullYear(); m = parsed.getMonth() + 1; d = parsed.getDate();
+  }
+  y = Number(y); m = Number(m); d = Number(d);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+function parseNumber(value) {
+  const n = parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
 }
 
 // Maps arbitrary CSV headers onto our bodyComposition schema fields.
+// Returns { entries, skipped } — skipped counts rows with no usable date or
+// no recognised measurements.
 export function mapCsvRowsToBodyComposition(rows) {
   const headerMap = {}; // csvHeader -> schemaField
   if (rows.length > 0) {
-    const csvHeaders = Object.keys(rows[0]);
-    csvHeaders.forEach((csvHeader) => {
+    Object.keys(rows[0]).forEach((csvHeader) => {
       const norm = normalizeKey(csvHeader);
       for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-        if (aliases.some((a) => normalizeKey(a) === norm)) {
-          headerMap[csvHeader] = field;
-        }
+        if (aliases.includes(norm)) headerMap[csvHeader] = field;
       }
     });
   }
 
-  return rows
-    .map((row) => {
-      const entry = {};
-      Object.entries(row).forEach(([csvHeader, value]) => {
-        const field = headerMap[csvHeader];
-        if (!field || value === '') return;
-        entry[field] = field === 'date' ? value : Number(value);
-      });
-      return entry;
-    })
-    .filter((e) => e.date); // a row without a date can't be plotted on the trend charts
+  const entries = [];
+  let skipped = 0;
+  rows.forEach((row) => {
+    const entry = {};
+    Object.entries(row).forEach(([csvHeader, value]) => {
+      const field = headerMap[csvHeader];
+      if (!field || value === '') return;
+      if (field === 'date') {
+        const date = normalizeDate(value);
+        if (date) entry.date = date;
+      } else {
+        const num = parseNumber(value);
+        if (num !== null) entry[field] = num;
+      }
+    });
+    if (entry.date && Object.keys(entry).length > 1) entries.push(entry);
+    else skipped += 1;
+  });
+  return { entries, skipped };
 }
